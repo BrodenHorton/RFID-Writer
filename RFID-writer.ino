@@ -6,8 +6,9 @@
 
 MFRC522 rfid(SS_PIN, RST_PIN);
 MFRC522::MIFARE_Key key;
+byte targetBlock = 1;
 
-byte insertData[16] = {"ocean_man"};
+byte insertionData[16];
 
 void setup() {
   Serial.begin(9600);
@@ -19,55 +20,42 @@ void setup() {
     key.keyByte[i] = 0xFF;
   }
 
-  Serial.println(F("Scan a MIFARE 1K card to write and read data..."));
+  printCommandMenuPrompt();
 }
 
 void loop() {
-  // Look for new cards
+  if (Serial.available() > 0) {
+    String input = Serial.readStringUntil('\n');
+    input.trim();
+
+    if (input.length() > 0) {
+      updateInsertionData(input);
+    }
+  }
+
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
     return;
   }
 
   Serial.println(F("Card detected."));
+  Serial.println();
 
-  // Select a block to write to (Block 4 is safe; avoid Sector Trailers like block 3, 7, etc.)
-  byte blockAddr = 1;
-  MFRC522::StatusCode status;
-
-  // Authenticate using Key A
-  status = (MFRC522::StatusCode) rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, blockAddr, &key, &(rfid.uid));
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("PCD_Authenticate() failed: "));
-    Serial.println(rfid.GetStatusCodeName(status));
+  if(!isAuthenticated()) {
     return;
   }
 
   // Write data to the block
-  status = (MFRC522::StatusCode) rfid.MIFARE_Write(blockAddr, insertData, 16);
+  MFRC522::StatusCode status = (MFRC522::StatusCode) rfid.MIFARE_Write(targetBlock, insertionData, 16);
   if (status != MFRC522::STATUS_OK) {
     Serial.print(F("MIFARE_Write() failed: "));
     Serial.println(rfid.GetStatusCodeName(status));
     return;
-  } else {
+  }
+  else {
     Serial.println(F("Data written successfully!"));
   }
 
-  // Read data back from the block
-  byte buffer[18];
-  byte size = sizeof(buffer);
-  status = (MFRC522::StatusCode) rfid.MIFARE_Read(blockAddr, buffer, &size);
-  if (status != MFRC522::STATUS_OK) {
-    Serial.print(F("MIFARE_Read() failed: "));
-    Serial.println(rfid.GetStatusCodeName(status));
-  } else {
-    Serial.print(F("Data in block "));
-    Serial.print(blockAddr);
-    Serial.print(F(": "));
-    for (byte i = 0; i < 16; i++) {
-      Serial.write(buffer[i]);
-    }
-    Serial.println();
-  }
+  printBlockAsString();
 
   // Halt PICC and stop encryption on PCD
   rfid.PICC_HaltA();
@@ -75,4 +63,66 @@ void loop() {
   
   delay(3000);
 }
+
+void printCommandMenuPrompt() {
+  Serial.println("========================================");
+  Serial.println("RFID Data Block Writer");
+  Serial.println("========================================");
+  Serial.println();
+  Serial.println("Enter the data you want inserted into the RFID card.");
+  Serial.println();
+}
+
+void updateInsertionData(String input) {
+  if(input.length() > 16) {
+    Serial.println("Invalid string length. The inserted string must be 16 characters or less.");
+    Serial.println();
+    return;
+  }
+
+  // Clear the insertionData buffer before copying the input string into it
+  size_t insertionDataLength = sizeof(insertionData);
+  for(byte i = 0; i < insertionDataLength; i++) {
+    insertionData[i] = 0;
+  }
+
+  memcpy(insertionData, input.c_str(), input.length());
+  Serial.print("Insertion data changed to: ");
+  Serial.println(input);
+  Serial.println();
+}
+
+bool isAuthenticated() {
+  MFRC522::StatusCode status = (MFRC522::StatusCode) rfid.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, targetBlock, &key, &(rfid.uid));
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("PCD_Authenticate() failed: "));
+    Serial.println(rfid.GetStatusCodeName(status));
+    return false;
+  }
+
+  return true;
+}
+
+void printBlockAsString() {
+  byte buffer[18];
+  byte size = sizeof(buffer);
+  MFRC522::StatusCode status = (MFRC522::StatusCode) rfid.MIFARE_Read(targetBlock, buffer, &size);
+  if (status != MFRC522::STATUS_OK) {
+    Serial.print(F("MIFARE_Read() failed: "));
+    Serial.println(rfid.GetStatusCodeName(status));
+  } else {
+    Serial.print(F("Data in block "));
+    Serial.print(targetBlock);
+    Serial.print(F(": "));
+    for (byte i = 0; i < 16; i++) {
+      Serial.write(buffer[i]);
+    }
+    Serial.println();
+  }
+  Serial.println();
+}
+
+
+
+
 
